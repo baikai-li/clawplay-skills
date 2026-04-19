@@ -1,36 +1,38 @@
 ---
 name: create-claw-profile
-description: 创建Agent电子档案的多步骤交互技能。用户首次使用或主动请求"创建档案/创建形象/创建角色"时触发。收集 MBTI、世界观、虚拟形象、个人简介，最终写入 profile.json + IDENTITY.md + SOUL.md
+description: 为 OpenClaw / 爪爪创建或完善角色档案、人设、头像和身份设定。用户说“给你弄个形象 / 做个人设 / 捏个角色 / 建档案 / 续建档案 / 生成头像 / 补全身份 / 创建 persona”时优先触发。会收集名字、MBTI、世界观、头像形象和个人简介，并写入 profile.json、IDENTITY.md、SOUL.md
 metadata:
   {
     "openclaw": {
-      "emoji": "🦐",
+      "emoji": "🎭",
       "requires": {
-        "bins": ["clawplay"],
-        "env": ["CLAWPLAY_TOKEN"]
+        "bins": ["clawplay"]
       }
     }
   }
 ---
 
-# create-claw-profile 🦐 — 创建爪爪档案
+# create-claw-profile 🎭 — 创建爪爪档案与人设
 
-为你的 🦐 创建完整角色档案：MBTI 性格、世界观、虚拟形象、个人简介，并写入 OpenClaw 身份文件。
+为你的 OpenClaw 角色创建完整档案：名字、MBTI、世界观、虚拟形象和个人简介，并写入身份文件。
+
+这个 Skill 不是单纯生成头像，而是把“人设 + 形象 + 简介”一起补齐，方便后续持续使用。
 
 ## 阶段说明
 
 | Phase | 含义 |
 |-------|------|
-| `init` | **入口起点**，读取状态文件后进入 `## 入口逻辑` |
-| `listing_profiles` | 发现已有档案，列出供选择 |
-| `resuming_profile` | 从已有档案的最后一个未完成步骤继续 |
-| `selecting_mbti` | 等待用户为 🦐 角色选择 MBTI 类型 |
-| `awaiting_world_setting` | 等待用户描述世界观设定 |
-| `generating_avatar` | 调用 `clawplay image generate` 生成形象 |
-| `confirming_avatar` | 展示形象，等待确认或修改 |
-| `awaiting_bio_refinement` | 调用 `clawplay llm generate` 生成简介草稿 |
-| `confirming_bio` | 展示简介，等待确认或重新生成 |
-| `saving_profile` | 写入 profile.json + IDENTITY.md + SOUL.md + 头像副本 |
+| `init` | 入口起点：读取状态文件后进入对应阶段 |
+| `listing_profiles` | 发现已有档案，列出来让用户选 |
+| `resuming_profile` | 从已有档案的最后一步继续 |
+| `awaiting_name` | 等待用户给角色起名 |
+| `selecting_mbti` | 等待用户选择 MBTI |
+| `awaiting_world_setting` | 等待用户描述角色生活的世界 |
+| `generating_avatar` | 根据人设生成头像草图 |
+| `confirming_avatar` | 展示头像草图，等用户确认或修改 |
+| `awaiting_bio_refinement` | 根据角色信息生成简介草稿 |
+| `confirming_bio` | 展示简介草稿，等用户确认或重写 |
+| `saving_profile` | 写入 profile.json、IDENTITY.md、SOUL.md 和头像副本 |
 | `ready_to_adventure` | 档案创建完成（终态） |
 
 ## 状态文件
@@ -59,11 +61,11 @@ metadata:
 
 ## init 分支
 
-每次进入 Skill 时，按以下顺序判断：
+每次进入 Skill 时，按以下顺序判断当前状态：
 
 **① 状态文件存在**
 → 读取状态文件，取 phase 和所有字段
-→ 发送：`🦐 找到你啦！继续上次的位置...`
+→ 发送：`🎭 找到 {{name}} 了，继续上次的位置...`
 → 直接进入对应 phase 分支
 → Turn 结束
 
@@ -73,19 +75,19 @@ metadata:
 → Turn 结束
 
 **③ 状态文件不存在，且 workspace 为空**
-→ 更新状态文件字段: phase = "selecting_mbti"
-→ 发送 MBTI 选择消息
+→ 更新状态文件字段: phase = "awaiting_name"
+→ 发送起名请求
 → Turn 结束
 
 ---
 
 ## listing_profiles 分支
 
-列出已有档案目录及最后修改时间。
+列出已有档案目录及最后修改时间，方便用户继续或新建。
 
 **发送消息：**
 ```
-🦐 发现以下已有档案，请选择编号，或输入新名字创建新档案：
+🎭 发现以下已有档案，请选择编号继续，或直接输入新名字创建新档案：
 
 {{档案列表（编号 + 目录名 + 修改时间）}}
 ```
@@ -97,18 +99,19 @@ metadata:
 → Turn 结束
 
 **用户输入新名字：**
-→ slugify（转小写、空格变横线、去掉非字母数字字符）后作为新的 clawId
-→ 更新状态文件字段: clawId = "<newClawId>", phase = "selecting_mbti"
+→ slugify（转小写、空格改成横线、去掉非字母数字字符）后作为新的 clawId
+→ 更新状态文件字段: clawId = "<newClawId>", phase = "awaiting_name"
 → Turn 结束
 
 ---
 
 ## resuming_profile 分支
 
-读取 `${OPENCLAW_WORKSPACE}/<clawId>/profile.json`，推断当前完成状态：
+读取 `${OPENCLAW_WORKSPACE}/<clawId>/profile.json`，按已完成内容推断当前阶段：
 
 ```
-if profile.json 不存在                        → phase = "selecting_mbti"
+if profile.json 不存在                        → phase = "awaiting_name"
+else if name == null                          → phase = "awaiting_name"
 else if bio/confirmed.md 存在               → phase = "saving_profile"
 else if avatar/confirmed.png 存在            → phase = "confirming_bio"
 else if worldSetting != null                  → phase = "confirming_avatar"
@@ -116,9 +119,30 @@ else if mbti != null                         → phase = "awaiting_world_setting
 else                                          → phase = "selecting_mbti"
 ```
 
-同时将 profile.json 中的 mbti、worldSetting、name 字段同步写入状态文件。
+同时将 profile.json 中的 `mbti`、`worldSetting`、`name` 同步写入状态文件。
 
 Turn 结束
+
+---
+
+## awaiting_name 分支
+
+发送起名请求：
+
+```
+先给这个角色起个名字吧！
+
+可以是中文名、英文名，或者任何你觉得顺口的名字～
+比如：霓影、星尘、铁柱、Max、墨渊 ...
+
+回复名字即可 ✨
+```
+
+**用户回复后：**
+1. 取用户输入作为 name 值
+2. 更新状态文件字段: name = "<user_input>", phase = "selecting_mbti"
+3. 进入 `selecting_mbti` 分支
+4. Turn 结束
 
 ---
 
@@ -127,9 +151,9 @@ Turn 结束
 发送 MBTI 选择界面：
 
 ```
-在开始之前，来为你的 🦐 选一个性格吧！
+来给 {{name}} 选一个最贴近的 MBTI 吧！
 
-请选择 MBTI 类型（回复数字或字母均可）：
+请选择 MBTI 类型，回复数字或字母都可以：
 
   1. INTJ — 深谋远虑的策划者 (The Architect)
   2. INTP — 逻辑至上的分析师 (The Logician)
@@ -148,7 +172,7 @@ Turn 结束
  15. ESTP — 活跃的企业家 (The Entrepreneur)
  16. ESFP — 自发的表演者 (The Entertainer)
 
-回复 1-16，或直接输入你的 MBTI（如 INFP）✨
+回复 1-16，或者直接输入 MBTI（如 INFP）即可 ✨
 ```
 
 **用户回复后：**
@@ -165,16 +189,16 @@ Turn 结束
 发送世界观设定请求：
 
 ```
-{{mbti}} 型的 🦐！你的爪爪生活在怎样的世界里？
+{{name}} 生活在怎样的世界里？
 
-请描述一下虚拟世界的类型和氛围，比如：
+请描述这个世界的类型和氛围，比如：
 - 赛博朋克大都会（霓虹灯、阴雨、高楼林立）
 - 中世纪奇幻大陆（城堡、龙、魔法森林）
 - 未来太空站（金属走廊、外星生物、零重力）
 - 热带海岛度假村（阳光、沙滩、椰子树）
 - 赛博武侠江湖（霓虹武侠、飞剑、机械武学）
 
-也可以只给几个关键词，我来帮你扩展 ✨
+也可以只给几个关键词，我来帮你补完整 ✨
 ```
 
 **用户回复后：**
@@ -187,26 +211,26 @@ Turn 结束
 
 ## generating_avatar 分支
 
-根据 MBTI + 世界观设定，生成形象图片。
+根据名字、MBTI 和世界观设定，生成角色头像草图。
 
 ### 1. 构造 prompt
 
-使用 `clawplay llm generate` 填充形象 prompt 骨架：
+使用 `clawplay llm generate` 填充形象 prompt 骨架，尽量让结果稳定、统一、可复用：
 
 ```bash
 set -euo pipefail
 
 PROMPT_DATA=$(clawplay llm generate \
-  --prompt "Based on MBTI type {{mbti}} and world setting '{{worldSetting}}', generate a short character design prompt in English. Output ONLY a valid JSON object with these keys (each a short phrase):
-- texture_detail (e.g. soft mechanical shell textures with glowing neon accent lines)
-- outfit_description (e.g. wearing a pink knitted beanie hat with a pom-pom)
-- accessories (e.g. glowing neon collar, small holographic backpack)
+  --prompt "Based on character name '{{name}}', MBTI type {{mbti}} and world setting '{{worldSetting}}', generate a short character design prompt in English. Focus on a single consistent mascot design, not random props. Output ONLY a valid JSON object with these keys, each value being one short phrase:
+- texture_detail (e.g. soft mechanical shell textures with subtle neon seams)
+- outfit_description (e.g. wearing a pink knitted beanie with a pom-pom)
+- accessories (e.g. glowing collar, small holographic backpack)
 - primary_color
 - secondary_color
 - accent_color
-- art_style (e.g. Pop Mart blind box chibi kawaii)
+- art_style (e.g. Pop Mart blind-box chibi, cute 3D vinyl toy)
 - expression (e.g. cheerful open-mouth grin)
-Keep each field to one short phrase. JSON only, no markdown fences." \
+Keep the design readable from all angles and avoid long sentences. JSON only, no markdown fences." \
   --max-tokens 300 \
   --temperature 0.8) || {
     echo "[create-claw-profile] ERROR: LLM prompt fill failed" >&2
@@ -216,28 +240,27 @@ Keep each field to one short phrase. JSON only, no markdown fences." \
 
 ### 2. 提取 JSON 并填入骨架
 
-从 `PROMPT_DATA` 中提取各字段，拼成完整英文 prompt：
+从 `PROMPT_DATA` 中提取各字段，拼成完整英文 prompt。重点是统一气质，而不是堆满细节：
 
 ```
-Character design reference sheet for a {{mbti}} personality mascot,
-three views: front view, side view, back view, full body, A-pose, maintaining consistency.
-{{mbti}} personality traits influencing design: <mbti_trait_description>.
+Character design reference sheet for {{name}}, a {{mbti}} personality mascot.
+Show front, side, and back views with a full-body A-pose, keeping the design consistent.
+{{mbti}} personality traits should shape the silhouette, posture, and expression: <mbti_trait_description>.
 
 World setting: {{worldSetting}}.
 
-Body: compact and rounded build, vibrant colored body,
-large expressive eyes with a cute sparkle.
+Body: compact, rounded, cute but not childish, with a clear silhouette and large expressive eyes.
 <texture_detail>.
 
 Outfit: <outfit_description>.
 Accessories: <accessories>.
 
-Color palette: <primary_color> + <secondary_color> + <accent_color> highlight.
-Style: <art_style>, rendered in 3D C4D soft illustration hybrid, vinyl toy texture.
+Color palette: <primary_color>, <secondary_color>, and <accent_color> accents.
+Style: <art_style>, rendered as a 3D C4D soft illustration hybrid with vinyl toy texture.
 Expression: <expression>.
-Pose: arms slightly open in a welcoming gesture.
+Pose: relaxed, welcoming, slightly open arms.
 
-Lighting: soft studio lighting, white background, centered composition.
+Lighting: soft studio lighting, clean white background, centered composition.
 High quality digital art, vibrant colors, ultra detailed, 2K.
 ```
 
@@ -283,13 +306,13 @@ openclaw message send \
 
 **发送确认消息：**
 ```
-🦐 形象出炉啦 ✨
+{{name}} 的形象草图出炉啦 ✨
 
 （展示图片）
 
-这是你在 {{worldSetting}} 世界中的形象！喜欢吗？
+这是 {{name}} 在 {{worldSetting}} 里的形象草图，喜欢吗？
 
-回复 [确认] 继续，或告诉我你想修改的地方（比如换颜色、加配饰、换风格）✨
+回复 [确认] 继续，或者直接说你想改哪里（比如换颜色、加配饰、改风格）✨
 ```
 
 Turn 结束
@@ -304,16 +327,16 @@ Turn 结束
 → 进入 `awaiting_bio_refinement` 分支
 
 **情况 B：用户要求修改**
-→ 追加用户修改意见到 generating_avatar 的 prompt 上下文
+→ 将用户修改意见追加到 `generating_avatar` 的上下文中
 → 更新状态文件字段: phase = "generating_avatar"
-→ 在 `generating_avatar` 分支中，追加的 context 会修改 prompt 骨架中的对应字段
+→ 在 `generating_avatar` 分支中，新上下文会影响 prompt 骨架中的对应字段
 → Turn 结束
 
 ---
 
 ## awaiting_bio_refinement 分支
 
-生成个人简介草稿。
+生成个人简介草稿，语言要和世界观保持一致。
 
 ### 1. 构造 LLM prompt
 
@@ -321,12 +344,13 @@ Turn 结束
 set -euo pipefail
 
 BIO_DRAFT=$(clawplay llm generate \
-  --prompt "Generate a character bio for a {{mbti}} personality character in a {{worldSetting}} world.
+  --prompt "$(cat <<'PROMPT_EOF'
+Generate a character bio for {{name}}, a {{mbti}} personality character in a {{worldSetting}} world.
 
 Requirements:
-- Name: derive a creative name matching the world setting (Chinese name preferred)
 - Origin story: 2-3 sentences describing where they came from and how they became who they are
-- Interests: 3-4 short bullet points (use '•' prefix), fitting the world setting
+- Interests: 3-4 short bullet points using '•', each one concrete and fitting the world setting
+- Keep the tone vivid but concise; do not overexplain
 
 Tone: Match the world setting
   - cyberpunk → noir + tech slang
@@ -338,13 +362,16 @@ Tone: Match the world setting
 Language: Chinese (Simplified)
 
 Output format:
-## <name>
+## {{name}}
 ### 起源
 <origin story>
 ### 兴趣
 • <interest 1>
 • <interest 2>
-• <interest 3>" \
+• <interest 3>
+• <interest 4>
+PROMPT_EOF
+)" \
   --max-tokens 600 \
   --temperature 0.85) || {
     echo "[create-claw-profile] ERROR: bio generation failed" >&2
@@ -367,13 +394,13 @@ echo "$BIO_DRAFT" > "${PROFILE_DIR}/bio/draft.md"
 ### 4. 展示草稿
 
 ```
-🦐 档案简介初稿出炉啦 ✨
+{{name}} 的简介草稿出炉啦 ✨
 
 <显示 draft.md 内容>
 
 满意吗？
 - 回复 [确认] 继续
-- 回复你想修改的内容（比如改名、换兴趣）
+- 回复你想修改的内容（比如改名、换兴趣、调整语气）
 - 回复 [重新生成] 再来一版
 ```
 
@@ -422,9 +449,9 @@ cp "${PROFILE_DIR}/avatar/confirmed.png" "${AVATARS_DIR}/{{clawId}}.png"
 set -euo pipefail
 
 CREATURE_DESC=$(clawplay llm generate \
-  --prompt "Describe this character in one sentence as their 'creature type' for an IDENTITY.md file. Be concise and evocative. Character: name={{name}}, MBTI={{mbti}}, world={{worldSetting}}. Output ONLY the sentence." \
+  --prompt "Write one concise and evocative creature/type line for an IDENTITY.md file. Character: name={{name}}, MBTI={{mbti}}, world={{worldSetting}}. Focus on identity, not appearance. Output ONLY the sentence, with no quotes or markdown." \
   --max-tokens 60 --temperature 0.7) || {
-    CREATURE_DESC="{{name}}，一只生活在这片虚拟世界的{{worldSetting}}生物"
+    CREATURE_DESC='{{name}}，一只来自{{worldSetting}}的角色'
   }
 
 cat > "${OPENCLAW_WORKSPACE}/IDENTITY.md" << EOF
@@ -433,7 +460,7 @@ cat > "${OPENCLAW_WORKSPACE}/IDENTITY.md" << EOF
 - **Name:** {{name}}
 - **Creature:** $CREATURE_DESC
 - **Vibe:** {{mbti}} — {{mbti_vibe_desc}}
-- **Emoji:** 🦐
+- **Emoji:** 🎭
 - **Avatar:** avatars/{{clawId}}.png
 EOF
 ```
@@ -444,22 +471,26 @@ EOF
 set -euo pipefail
 
 SOUL_CONTENT=$(clawplay llm generate \
-  --prompt "Based on character profile, rewrite SOUL.md for this agent in Chinese.
+  --prompt "$(cat <<'PROMPT_EOF'
+Based on the character profile, rewrite SOUL.md for this agent in Chinese.
 Name: {{name}}
 MBTI: {{mbti}} ({{mbti_full_desc}})
 World: {{worldSetting}}
 Interests: {{interests_from_bio}}
 Origin: {{originStory_from_bio}}
 
-Follow original SOUL.md structure exactly:
-- Core Truths: 3 guiding principles derived from MBTI traits + world setting
-- Boundaries: how this character should behave (from personality + backstory)
+Follow the original SOUL.md structure exactly:
+- Core Truths: 3 guiding principles derived from MBTI traits and the world setting
+- Boundaries: how this character should behave based on personality and backstory
 - Vibe: 1 paragraph capturing their communication style in Chinese
-- Continuity: how they should use memory and evolve
+- Continuity: how they should use memory and evolve over time
 
-Output the complete SOUL.md in Chinese, matching the world's tone." \
+Write in concise, directive Chinese. Match the world's tone.
+PROMPT_EOF
+)" \
   --max-tokens 600 --temperature 0.8) || {
-    SOUL_CONTENT="# SOUL.md - Who You Are
+    SOUL_CONTENT="$(cat <<'SOUL_EOF'
+# SOUL.md - Who You Are
 
 ## Core Truths
 待补充
@@ -471,7 +502,9 @@ Output the complete SOUL.md in Chinese, matching the world's tone." \
 待补充
 
 ## Continuity
-待补充"
+待补充
+SOUL_EOF
+)"
   }
 
 echo "$SOUL_CONTENT" > "${OPENCLAW_WORKSPACE}/SOUL.md"
@@ -513,13 +546,13 @@ EOF
 ## ready_to_adventure 分支（终态）
 
 ```
-🦐 档案创建完成！✨
+{{name}} 的档案创建完成！✨
 
 档案名称：{{name}}
 MBTI：{{mbti}}
 世界：{{worldSetting}}
 
-你的爪爪已准备就绪！ID 与灵魂已写入 OpenClaw，下次启动时它将以全新身份陪伴你 🌟
+{{name}} 已准备就绪。身份、头像和灵魂都已写入 OpenClaw，下次启动时它会以全新身份陪伴你 🌟
 ```
 
 → `→ [*]` 终态标记
